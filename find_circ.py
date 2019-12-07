@@ -436,6 +436,9 @@ class Hit(object):
         self.strand_plus = 0
         self.strand_minus = 0
         self.strandmatch = 'NA'
+        # WZS
+        self.flank_5 = "NNNN"
+        self.flank_3 = "NNNN"
         
     def add(self,read,A,B,dist,ov,strandmatch,signal,n_hits):
         self.signal = signal
@@ -443,6 +446,8 @@ class Hit(object):
         self.edits.append(dist)
         self.overlaps.append(ov)
         self.n_hits.append(n_hits)
+        self.flank_5 = flank_5
+        self.flank_3 = flank_3
 
         # by convention have A precede B in the genome.
         if A.pos > B.pos:
@@ -502,7 +507,7 @@ class Hit(object):
         #print self.edits,self.overlaps,self.n_hits
         tissues = sorted(self.tissues.keys())
         tiss_counts = [str(self.tissues[k]) for k in tissues]
-        return (n_reads,n_uniq,best_qual_A,best_qual_B,self.uniq_bridges,tissues,tiss_counts,min(self.edits),min(self.overlaps),min(self.n_hits),self.signal,self.strandmatch)
+        return (n_reads,n_uniq,best_qual_A,best_qual_B,self.uniq_bridges,tissues,tiss_counts,min(self.edits),min(self.overlaps),min(self.n_hits),self.signal,self.strandmatch,self.flank_5,self.flank_3)
                 
         
 loci = defaultdict(list)
@@ -583,9 +588,13 @@ def find_breakpoints(A,B,read,chrom,margin=options.margin,maxdist=options.maxdis
 
             else:
                 if gtag == 'GTAG':
-                    hits.append((dist,ov,strandmatch(strand,'+'),rnd(),chrom,start,end,'GTAG','+'))
+                    flank_5 = genome.get(chrom,start - 10,start + 10,'+').upper()
+                    flank_3 = genome.get(chrom,end - 11,end + 9,'+').upper()
+                    hits.append((dist,ov,strandmatch(strand,'+'),rnd(),chrom,start,end,'GTAG','+',flank_5,flank_3))
                 elif gtag == 'CTAC':
-                    hits.append((dist,ov,strandmatch(strand,'-'),rnd(),chrom,start,end,'GTAG','-'))
+                    flank_5 = rev_comp(genome.get(chrom,end-11,end+9,'+')).upper()
+                    flank_3 = rev_comp(genome.get(chrom,start-10,start+10,'+')).upper()
+                    hits.append((dist,ov,strandmatch(strand,'-'),rnd(),chrom,start,end,'GTAG','-',flank_5,flank_3))
 
     if len(hits) < 2:
         # unambiguous, return right away
@@ -660,9 +669,9 @@ try:
 
             for h in bp:
                 # for some weird reason for circ we need a correction here
-                dist,ov,strandmatch,rnd,chrom,start,end,signal,sense = h
+                dist,ov,strandmatch,rnd,chrom,start,end,signal,sense,flank_5,flank_3 = h
                 h = (chrom,start+1,end-1,sense)
-                circs[h].add(read,A,B,dist,ov,strandmatch,signal,n_hits)
+                circs[h].add(read,A,B,dist,ov,strandmatch,signal,n_hits,flank_5,flank_3)
 
         elif (A.is_reverse and dist < 0) or (not A.is_reverse and dist > 0):
             # the anchors align sequentially -> linear/normal splice junction?
@@ -685,9 +694,9 @@ try:
             
             for h in bp:
                 #print h
-                dist,ov,strandmatch,rnd,chrom,start,end,signal,sense = h
+                dist,ov,strandmatch,rnd,chrom,start,end,signal,sense,flank_5,flank_3 = h
                 h = (chrom,start,end,sense)
-                splices[h].add(read,A,B,dist,ov,strandmatch,signal,n_hits)
+                splices[h].add(read,A,B,dist,ov,strandmatch,signal,n_hits,flank_5,flank_3)
                 
                 # remember the spliced reads at these sites
                 loci[(chrom,start,sense)].append(splices[h])
@@ -710,12 +719,12 @@ except:
     sys.exit(1)
 
 def output(cand,prefix):
-    print "#","\t".join(['chrom','start','end','name','n_reads','strand','n_uniq','uniq_bridges','best_qual_left','best_qual_right','tissues','tiss_counts','edits','anchor_overlap','breakpoints','signal','strandmatch','category'])
+    print "#","\t".join(['chrom','start','end','name','n_reads','strand','n_uniq','uniq_bridges','best_qual_left','best_qual_right','tissues','tiss_counts','edits','anchor_overlap','breakpoints','signal','strandmatch','category','flank_5','flank_3'])
     n = 1
     for c,hit in cand.items():
         #print c
         chrom,start,end,sense = c
-        n_reads,n_uniq,best_qual_A,best_qual_B,uniq_bridges,tissues,tiss_counts,min_edit,min_anchor_ov,n_hits,signal,strandmatch = hit.scores(chrom,start,end,sense)
+        n_reads,n_uniq,best_qual_A,best_qual_B,uniq_bridges,tissues,tiss_counts,min_edit,min_anchor_ov,n_hits,signal,strandmatch,flank_5,flank_3 = hit.scores(chrom,start,end,sense)
         
         if options.halfunique:
             if (best_qual_A < options.min_uniq_qual) and (best_qual_B < options.min_uniq_qual):
@@ -763,7 +772,7 @@ def output(cand,prefix):
             categories.append("LINEAR")
 
 
-        bed = [chrom,start-1,end,name,n_reads,sense,n_uniq,uniq_bridges,best_qual_A,best_qual_B,",".join(tissues),",".join(tiss_counts),min_edit,min_anchor_ov,n_hits,signal,strandmatch,",".join(sorted(categories))]
+        bed = [chrom,start-1,end,name,n_reads,sense,n_uniq,uniq_bridges,best_qual_A,best_qual_B,",".join(tissues),",".join(tiss_counts),min_edit,min_anchor_ov,n_hits,signal,strandmatch,",".join(sorted(categories)),flank_5,flank_3]
         print "\t".join([str(b) for b in bed])
 
 stats = file(options.stats,"w")
